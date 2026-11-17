@@ -20,6 +20,40 @@ class AppRepository(context: Context) {
 
     init {
         initInitialDataIfEmpty()
+        syncWithSupabase()
+    }
+
+    private fun syncWithSupabase() {
+        // Fetch users from Supabase
+        SupabaseClient.fetchUsers { remoteUsers ->
+            if (!remoteUsers.isNullOrEmpty()) {
+                saveUsers(remoteUsers)
+            } else {
+                // If remote is empty, push local initial users
+                val localUsers = getUsers()
+                localUsers.forEach { SupabaseClient.upsertUser(it) }
+            }
+        }
+
+        // Fetch buildings from Supabase
+        SupabaseClient.fetchBuildings { remoteBuildings ->
+            if (!remoteBuildings.isNullOrEmpty()) {
+                saveBuilding(remoteBuildings.first())
+            } else {
+                val localBuilding = getBuilding()
+                SupabaseClient.upsertBuilding(localBuilding)
+            }
+        }
+
+        // Fetch attendance from Supabase
+        SupabaseClient.fetchAttendance { remoteRecords ->
+            if (!remoteRecords.isNullOrEmpty()) {
+                saveAttendanceList(remoteRecords)
+            } else {
+                val localRecords = getAllAttendance()
+                localRecords.forEach { SupabaseClient.upsertAttendanceRecord(it) }
+            }
+        }
     }
 
     private fun initInitialDataIfEmpty() {
@@ -66,7 +100,6 @@ class AppRepository(context: Context) {
         }
 
         if (!prefs.contains(KEY_BUILDING)) {
-            // Default: Toshkent markazi (Amir Temur xiyoboni yaqini)
             val defaultBuilding = Building(
                 id = "building_main",
                 name = "Markaziy Bosh Ofis",
@@ -78,7 +111,6 @@ class AppRepository(context: Context) {
         }
 
         if (!prefs.contains(KEY_ATTENDANCE)) {
-            // Namunaviy tarix yozuvlari
             val sampleAttendance = listOf(
                 AttendanceRecord(
                     id = UUID.randomUUID().toString(),
@@ -155,16 +187,18 @@ class AppRepository(context: Context) {
     fun addUser(user: User): Boolean {
         val users = getUsers().toMutableList()
         if (users.any { it.username.equals(user.username, ignoreCase = true) }) {
-            return false // username allaqachon mavjud
+            return false
         }
         users.add(user)
         saveUsers(users)
+        SupabaseClient.upsertUser(user)
         return true
     }
 
     fun deleteUser(userId: String) {
         val users = getUsers().filter { it.id != userId }
         saveUsers(users)
+        SupabaseClient.deleteUser(userId)
     }
 
     fun login(username: String, password: String): User? {
@@ -200,6 +234,7 @@ class AppRepository(context: Context) {
             put("radiusInMeters", building.radiusInMeters.toDouble())
         }
         prefs.edit().putString(KEY_BUILDING, obj.toString()).apply()
+        SupabaseClient.upsertBuilding(building)
     }
 
     // --- ATTENDANCE ---
@@ -295,6 +330,7 @@ class AppRepository(context: Context) {
             records.add(0, record)
         }
         saveAttendanceList(records)
+        SupabaseClient.upsertAttendanceRecord(record)
         return record
     }
 
@@ -312,6 +348,7 @@ class AppRepository(context: Context) {
             )
             records[existingIndex] = updated
             saveAttendanceList(records)
+            SupabaseClient.upsertAttendanceRecord(updated)
             return updated
         }
         return null
